@@ -1,0 +1,218 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - основная БД
+  postgres:
+    image: postgres:15-alpine
+    container_name: mlops_postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mlops_network
+
+  # MinIO - S3-совместимое хранилище
+  minio:
+    image: minio/minio:latest
+    container_name: mlops_minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - mlops_network
+
+  # MinIO Client - инициализация бакетов
+  minio-init:
+    image: minio/mc:latest
+    container_name: mlops_minio_init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb myminio/documents || true;
+      mc mb myminio/mlflow || true;
+      mc mb myminio/models || true;
+      mc policy set download myminio/models;
+      exit 0;
+      "
+    networks:
+      - mlops_network
+
+  # MLflow - трекинг экспериментов
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    container_name: mlops_mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=${MLFLOW_BACKEND_STORE_URI}
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+    command: >
+      mlflow server
+      --backend-store-uri ${MLFLOW_BACKEND_STORE_URI}
+      --default-artifact-root s3://mlflow/
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    networks:
+      - mlops_network
+
+  # Airflow Webserver
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: docker/airflow.Dockerfile
+    container_name: mlops_airflow_webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=${AIRFLOW__CORE__EXECUTOR}
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=${AIRFLOW__CORE__SQL_ALCHEMY_CONN}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW__WEBSERVER__SECRET_KEY}
+      - AIRFLOW_UID=${AIRFLOW_UID}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./services:/opt/airflow/services
+      - ./config:/opt/airflow/config
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - mlops_network
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: docker/airflow.Dockerfile
+    container_name: mlops_airflow_scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=${AIRFLOW__CORE__EXECUTOR}
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=${AIRFLOW__CORE__SQL_ALCHEMY_CONN}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
+      - AIRFLOW_UID=${AIRFLOW_UID}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./services:/opt/airflow/services
+      - ./config:/opt/airflow/config
+    command: scheduler
+    networks:
+      - mlops_network
+
+  # Inference API Service
+  inference-api:
+    build:
+      context: .
+      dockerfile: docker/inference.Dockerfile
+    container_name: mlops_inference_api
+    depends_on:
+      - postgres
+      - minio
+      - mlflow
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MODEL_NAME=${MODEL_NAME}
+      - MODEL_VERSION=${MODEL_VERSION}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD}
+    volumes:
+      - ./services/inference:/app
+      - ./data/models:/models
+    ports:
+      - "8000:8000"
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - mlops_network
+
+  # Prometheus - мониторинг метрик
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mlops_prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - mlops_network
+
+  # Grafana - визуализация метрик
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mlops_grafana
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    ports:
+      - "3000:3000"
+    networks:
+      - mlops_network
+
+volumes:
+  postgres_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  mlops_network:
+    driver: bridge
+

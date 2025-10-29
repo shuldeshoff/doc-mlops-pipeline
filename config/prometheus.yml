@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'mlops-docflow'
+
+scrape_configs:
+  # Inference API метрики
+  - job_name: 'inference-api'
+    static_configs:
+      - targets: ['inference-api:8000']
+    metrics_path: '/metrics'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # MLflow метрики (если доступны)
+  - job_name: 'mlflow'
+    static_configs:
+      - targets: ['mlflow:5000']
+    metrics_path: '/metrics'
+    
+  # Airflow метрики (если доступны)
+  - job_name: 'airflow'
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+    metrics_path: '/admin/metrics'
+
