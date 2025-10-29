@@ -1,0 +1,22 @@
+# CODEOWNERS file
+# These owners will be the default owners for everything in the repo.
+
+# Global owner
+* @shuldeshoff
+
+# Services
+/services/ @shuldeshoff
+
+# Documentation
+/README.md @shuldeshoff
+/CONTRIBUTING.md @shuldeshoff
+/docs/ @shuldeshoff
+
+# Configuration
+/docker-compose.yml @shuldeshoff
+/.github/ @shuldeshoff
+/config/ @shuldeshoff
+
+# Airflow DAGs
+/airflow/ @shuldeshoff
+

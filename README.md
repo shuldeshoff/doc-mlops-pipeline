@@ -465,7 +465,11 @@ MIT License
 
 ## 🤝 Contributing
 
-Pull requests приветствуются! Для больших изменений, пожалуйста, сначала откройте issue.
+Pull requests are welcome!  
+Please open an issue first to discuss proposed changes.  
+Follow code style and use clear commit messages.
+
+Подробнее о процессе участия читайте в [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

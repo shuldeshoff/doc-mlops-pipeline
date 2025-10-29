@@ -1,0 +1,41 @@
+# Автоматическое назначение меток для PR
+
+documentation:
+  - '**/*.md'
+  - 'docs/**/*'
+
+docker:
+  - 'docker/**/*'
+  - 'docker-compose.yml'
+  - 'Dockerfile*'
+
+services/ingestion:
+  - 'services/ingestion/**/*'
+
+services/ocr:
+  - 'services/ocr/**/*'
+
+services/training:
+  - 'services/training/**/*'
+
+services/inference:
+  - 'services/inference/**/*'
+
+services/monitoring:
+  - 'services/monitoring/**/*'
+
+airflow:
+  - 'airflow/**/*'
+
+config:
+  - 'config/**/*'
+  - '.env*'
+  - 'requirements.txt'
+
+tests:
+  - 'tests/**/*'
+  - '**/*test*.py'
+
+ci/cd:
+  - '.github/workflows/**/*'
+

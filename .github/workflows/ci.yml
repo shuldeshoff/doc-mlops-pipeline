@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8 mypy
+        pip install -r requirements.txt
+    
+    - name: Run Black
+      run: black --check services/
+    
+    - name: Run Flake8
+      run: flake8 services/ --max-line-length=100 --extend-ignore=E203,W503
+    
+    - name: Run MyPy
+      run: mypy services/ --ignore-missing-imports
+      continue-on-error: true
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov
+        pip install -r requirements.txt
+    
+    - name: Run Tests
+      run: |
+        pytest tests/ --cov=services --cov-report=xml
+      continue-on-error: true
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+      continue-on-error: true
+
+  docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Inference Image
+      run: |
+        docker build -f docker/inference.Dockerfile -t mlops-inference:test .
+    
+    - name: Build MLflow Image
+      run: |
+        docker build -f docker/mlflow.Dockerfile -t mlops-mlflow:test .
+    
+    - name: Build Airflow Image
+      run: |
+        docker build -f docker/airflow.Dockerfile -t mlops-airflow:test .
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+      continue-on-error: true
+    
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+      continue-on-error: true
+
