@@ -40,7 +40,7 @@ loguru==0.7.2
 
 # HTTP & Async
 httpx==0.26.0
-aiofiles==23.2.1
+aiofiles==25.1.0
 python-multipart==0.0.6
 
 # Utils
